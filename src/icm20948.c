@@ -1313,6 +1313,7 @@ icm20948_status_e icm20948_firmware_load(icm20948_device_t *pdev)
 #if CONFIG_ICM_20948_USE_DMP
     return (inv_icm20948_firmware_load(pdev, dmp3_image, sizeof(dmp3_image), DMP_LOAD_START));
 #else
+    (void)pdev;
     return ICM_20948_STAT_DMP_NOT_SUPPORTED;
 #endif
 }
