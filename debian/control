@@ -1,0 +1,21 @@
+Source: libicm20948
+Section: libs
+Priority: optional
+Maintainer: Jasem Mutlaq <mutlaqja@ikarustech.com>
+Build-Depends: debhelper (>= 10), cmake, libgpiod-dev
+Standards-Version: 4.5.0
+
+Package: libicm20948
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libgpiod2
+Description: Linux shared library for the ICM20948 9-axis IMU
+ libicm20948 provides a C/C++ interface to the InvenSense ICM20948
+ 9-axis IMU (accelerometer, gyroscope, and AK09916 magnetometer)
+ on Linux, using the native I2C and SPI kernel interfaces.
+
+Package: libicm20948-dev
+Architecture: any
+Depends: libicm20948 (= ${binary:Version}), ${misc:Depends}, libgpiod-dev
+Description: Development files for libicm20948
+ Headers, static library, CMake config files, and pkg-config file
+ for building software that uses libicm20948.

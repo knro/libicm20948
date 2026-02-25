@@ -1,0 +1,11 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: icm20948
+Description: C/C++ library for the ICM20948 9-axis IMU on Linux
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -licm20948
+Cflags: -I${includedir}
+Requires: libgpiodcxx

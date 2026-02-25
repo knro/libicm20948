@@ -1,0 +1,4 @@
+usr/include/icm20948/
+usr/lib/*/libicm20948.so
+usr/lib/*/cmake/ICM20948/
+usr/share/pkgconfig/icm20948.pc

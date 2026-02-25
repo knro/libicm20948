@@ -1,0 +1,6 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(GPIOD REQUIRED)
+
+include("${CMAKE_CURRENT_LIST_DIR}/ICM20948Targets.cmake")
