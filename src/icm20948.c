@@ -2,6 +2,10 @@
 #include "icm20948_registers.h"
 #include "ak09916_registers.h"
 
+#ifdef __linux__
+#include <unistd.h>   /* usleep() */
+#endif
+
 /*
  * Icm20948 device require a DMP image to be loaded on init
  * Provide such images by mean of a byte array
@@ -217,12 +221,18 @@ icm20948_status_e icm20948_i2c_controller_periph4_txn(icm20948_device_t *pdev, u
       return retval;
     }
 
-    // long tsTimeout = millis() + 3000;  // Emergency timeout for txn (hard coded to 3 secs)
+    // On Linux each iteration involves a full ioctl syscall (~10-50 µs each).
+    // Sleep 500 µs per iteration so the internal I2C transaction (≈200-300 µs at
+    // 345.6 kHz for a single byte) has time to complete before we check status.
+    // 1000 iterations × 500 µs = 500 ms hard timeout – more than enough.
     uint32_t max_cycles = 1000;
     uint32_t count = 0;
     bool peripheral4Done = false;
     while (!peripheral4Done)
     {
+#ifdef __linux__
+      usleep(500); // 500 µs – allow internal I2C transaction to complete
+#endif
       retval = icm20948_set_bank(pdev, 0);
       retval = icm20948_execute_r(pdev, AGB0_REG_I2C_MST_STATUS, (uint8_t *)&i2c_mst_status, 1);
 

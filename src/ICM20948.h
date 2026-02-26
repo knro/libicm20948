@@ -188,4 +188,18 @@ class ICM20948
          * @brief Convert gyroscope full-scale setting to LSB/(deg/s).
          */
         static float gyroFssToLsbPerDps(uint8_t fss);
+
+        /**
+         * @brief Write a single byte to any I2C device on the bus (I2C mode only).
+         *
+         * Used during magnetometer pass-through initialisation: while BYPASS_EN is
+         * asserted the host processor can talk directly to the AK09916 on the
+         * auxiliary bus using the same file descriptor as the ICM20948.
+         *
+         * @param i2c_addr  7-bit address of the target device.
+         * @param reg       Register address to write.
+         * @param val       Value to write.
+         * @return true on success.
+         */
+        bool _i2c_write_direct(uint8_t i2c_addr, uint8_t reg, uint8_t val);
 };

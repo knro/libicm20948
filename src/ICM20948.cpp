@@ -21,6 +21,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <linux/i2c.h>
+#include <linux/i2c-dev.h>
 #include <linux/spi/spidev.h>
 #include <cstring>
 #include <cerrno>
@@ -333,56 +335,97 @@ void ICM20948::_init()
     if (status != ICM_20948_STAT_OK)
         throw ICM20948_exception("ICM20948: failed to enable DLPF.");
 
-    // ── Magnetometer setup via internal I2C master ────────────────────────────
+    // ── Magnetometer setup ────────────────────────────────────────────────────
+    //
+    // Per ICM-20948 datasheet §4.11-4.12:
+    //   I2C host:  Use Pass-Through mode.  BYPASS_EN connects AUX_CL/AUX_DA
+    //              directly to the host's SCL/SDA via an internal analog switch,
+    //              so the host can configure the AK09916 (at 0x0C) just like any
+    //              other I2C device.  Afterwards disable bypass and enable the
+    //              ICM20948's internal I2C master to take over auto-reading.
+    //   SPI host:  The bypass mux shares the SPI pins, so pass-through is
+    //              unavailable.  Use Slave-4 (periph4) one-shot transactions.
 
-    // Disable I2C master pass-through; the ICM20948's I2C master will talk to the AK09916
-    status = icm20948_i2c_master_passthrough(&device, false);
-    if (status != ICM_20948_STAT_OK)
-        throw ICM20948_exception("ICM20948: failed to disable I2C passthrough.");
-
-    // Enable the internal I2C master
-    status = icm20948_i2c_master_enable(&device, true);
-    if (status != ICM_20948_STAT_OK)
-        throw ICM20948_exception("ICM20948: failed to enable I2C master.");
-
-    usleep(10000); // 10 ms – give I2C master time to start
-
-    // Reset I2C master to clear any stale state
-    icm20948_i2c_master_reset(&device);
-    usleep(1000);
-
-    // Put AK09916 magnetometer into continuous measurement mode 4 (100 Hz)
-    // CNTL2 register MODE[4:0] = 0b01000 = 0x08
-    uint8_t mag_mode = 0x08;
-    status = icm20948_i2c_master_single_w(
-                 &device,
-                 MAG_AK09916_I2C_ADDR,
-                 static_cast<uint8_t>(AK09916_REG_CNTL2),
-                 &mag_mode);
-    if (status != ICM_20948_STAT_OK)
+    if (m_Mode == MODE_I2C)
     {
-        // Non-fatal: warn but continue – magnetometer may not be reachable on SPI adapters
-        std::cerr << "ICM20948: warning – could not configure AK09916 magnetometer." << std::endl;
+        // ── Pass-Through path (I2C host) ──────────────────────────────────────
+        // Step 1: enable bypass mux (I2C_MST_EN must be 0 – reset default).
+        status = icm20948_i2c_master_passthrough(&device, true);
+        if (status != ICM_20948_STAT_OK)
+            throw ICM20948_exception("ICM20948: failed to enable I2C passthrough.");
+
+        usleep(5000); // 5 ms – let the analog switch settle
+
+        // Step 2: soft-reset the AK09916 directly (CNTL3.SRST = 1).
+        if (!_i2c_write_direct(MAG_AK09916_I2C_ADDR,
+                               static_cast<uint8_t>(AK09916_REG_CNTL3), 0x01))
+        {
+            std::cerr << "ICM20948: warning – AK09916 soft-reset write failed." << std::endl;
+        }
+        usleep(1000); // 1 ms – AK09916 needs ~100 µs after SRST
+
+        // Step 3: continuous measurement mode 4 (100 Hz).
+        if (!_i2c_write_direct(MAG_AK09916_I2C_ADDR,
+                               static_cast<uint8_t>(AK09916_REG_CNTL2), 0x08))
+        {
+            std::cerr << "ICM20948: warning – could not configure AK09916 magnetometer." << std::endl;
+        }
+
+        // Step 4: disable bypass – hand the aux bus back to the ICM20948.
+        status = icm20948_i2c_master_passthrough(&device, false);
+        if (status != ICM_20948_STAT_OK)
+            throw ICM20948_exception("ICM20948: failed to disable I2C passthrough.");
+
+        // Step 5: enable the ICM20948 internal I2C master.
+        status = icm20948_i2c_master_enable(&device, true);
+        if (status != ICM_20948_STAT_OK)
+            throw ICM20948_exception("ICM20948: failed to enable I2C master.");
+
+        usleep(10000); // 10 ms – let the internal master start up
+    }
+    else
+    {
+        // ── Periph4 path (SPI host) ───────────────────────────────────────────
+        status = icm20948_i2c_master_passthrough(&device, false);
+        if (status != ICM_20948_STAT_OK)
+            throw ICM20948_exception("ICM20948: failed to disable I2C passthrough.");
+
+        status = icm20948_i2c_master_enable(&device, true);
+        if (status != ICM_20948_STAT_OK)
+            throw ICM20948_exception("ICM20948: failed to enable I2C master.");
+
+        usleep(10000);
+
+        uint8_t ak_reset = 0x01;
+        if (icm20948_i2c_master_single_w(&device, MAG_AK09916_I2C_ADDR,
+                                          static_cast<uint8_t>(AK09916_REG_CNTL3),
+                                          &ak_reset) != ICM_20948_STAT_OK)
+            std::cerr << "ICM20948: warning – AK09916 soft-reset write failed." << std::endl;
+        usleep(1000);
+
+        uint8_t mag_mode = 0x08;
+        if (icm20948_i2c_master_single_w(&device, MAG_AK09916_I2C_ADDR,
+                                          static_cast<uint8_t>(AK09916_REG_CNTL2),
+                                          &mag_mode) != ICM_20948_STAT_OK)
+            std::cerr << "ICM20948: warning – could not configure AK09916 magnetometer." << std::endl;
     }
 
     // Configure peripheral 0 to automatically read 9 bytes from the AK09916
-    // starting at ST1 (0x10): ST1 + HXL + HXH + HYL + HYH + HZL + HZH + (reserved) + ST2
+    // starting at ST1: ST1 + HXL + HXH + HYL + HYH + HZL + HZH + TMPS + ST2
     status = icm20948_i2c_controller_configure_peripheral(
                  &device,
                  0,                              // peripheral slot 0
                  MAG_AK09916_I2C_ADDR,
                  static_cast<uint8_t>(AK09916_REG_ST1),
                  9,                              // read 9 bytes
-                 true,                           // read (Rw=true)
+                 true,                           // read
                  true,                           // enable
                  false,                          // data_only = false
                  false,                          // grp = false
                  false,                          // swap = false
                  0);                             // dataOut (don't care for reads)
     if (status != ICM_20948_STAT_OK)
-    {
         std::cerr << "ICM20948: warning – could not configure magnetometer peripheral." << std::endl;
-    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -421,4 +464,32 @@ float ICM20948::gyroFssToLsbPerDps(uint8_t fss)
         default:
             return 131.0f;
     }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Private: _i2c_write_direct
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Write a single byte to any I2C device on the bus (I2C mode only).
+ *
+ * Used during magnetometer pass-through init: while BYPASS_EN is asserted the
+ * AK09916 (address 0x0C) is electrically connected to the same SCL/SDA lines
+ * as the ICM20948, so we can talk to it directly via the same file descriptor.
+ */
+bool ICM20948::_i2c_write_direct(uint8_t i2c_addr, uint8_t reg, uint8_t val)
+{
+    uint8_t buf[2] = { reg, val };
+
+    struct i2c_msg msg;
+    msg.addr  = i2c_addr;
+    msg.flags = 0;          // write
+    msg.len   = 2;
+    msg.buf   = buf;
+
+    struct i2c_rdwr_ioctl_data msgset;
+    msgset.msgs  = &msg;
+    msgset.nmsgs = 1;
+
+    return (ioctl(m_I2cConfig.fd, I2C_RDWR, &msgset) >= 0);
 }

@@ -15,7 +15,7 @@ int main(void)
     std::cout << "[TEST 1] Attempting I2C initialization..." << std::endl;
     try
     {
-        imu.begin_i2c(ICM_20948_I2C_ADDR_AD0, "/dev/i2c-1");
+        imu.begin_i2c(ICM_20948_I2C_ADDR_AD0, "/dev/i2c-2");
         std::cout << "✅ SUCCESS: I2C initialization completed" << std::endl << std::endl;
     }
     catch (const ICM20948_exception &e)
